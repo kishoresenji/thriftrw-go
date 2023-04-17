@@ -152,13 +152,12 @@ func (l *listGenerator) Encoder(g Generator, spec *compile.ListSpec) (string, er
 	err := g.EnsureDeclared(
 		`
 		<$stream := import "go.uber.org/thriftrw/protocol/stream">
+		<$binary := import "go.uber.org/thriftrw/protocol/binary">
 
 		<$listType := typeReference .Spec>
 		<$sw := newVar "sw">
 		<$lh := newVar "lh">
-		<$i := newVar "i">
-		<$o := newVar "o">
-		<$k := newVar "k">
+		<$writer := newVar "writer">
 		<$v := newVar "v">
 		<$val := newVar "val">
 		func <.Name>(<$val> <$listType>, <$sw> <$stream>.Writer) error {
@@ -170,19 +169,65 @@ func (l *listGenerator) Encoder(g Generator, spec *compile.ListSpec) (string, er
 			if err := <$sw>.WriteListBegin(<$lh>); err != nil {
 				return err
 			}
-
-			<if isPrimitiveType .Spec.ValueSpec ->
-			for _, <$v> := range <$val> {
-			<- else ->
-			for <$i>, <$v> := range <$val> {
-				if <$v> == nil {
-					return <import "fmt">.Errorf("invalid list '<typeReference .Spec>', index [%v]: value is nil", <$i>)
+			type chunk struct {
+				idx int
+				<$val> <$listType>
+				buffer *<import "bytes">.Buffer
+				err error
+			}
+			numChunks := <import "runtime">.GOMAXPROCS(0)
+			if numChunks > len(<$val>) {
+				numChunks = len(<$val>)
+			}
+			if numChunks == 0 {
+				numChunks = 1
+			}
+			chunkSize := (len(<$val>) + numChunks - 1) / numChunks
+			chunks := make([]*chunk, 0, numChunks)
+			i := 0
+			for {
+				if i >= len(<$val>) {
+					break
 				}
-			<end ->
-
-				if err := <encode .Spec.ValueSpec $v $sw>; err != nil {
-					return err
+				j := i + chunkSize
+				if j > len(<$val>) {
+					j = len(<$val>)
 				}
+				chunks = append(chunks, &chunk{idx:i, <$val>:<$val>[i : j], buffer:binary.BufferPool.Get().(*bytes.Buffer)})
+				i += chunkSize
+			}
+			var wg <import "sync">.WaitGroup
+			for i := range chunks {
+				i := i
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					c := chunks[i]
+					<$writer> := binary.Default.Writer(c.buffer)
+					for i := range c.<$val> {
+						<$v> := c.<$val>[i]
+						<if isPrimitiveType .Spec.ValueSpec ->
+						<- else ->
+							if <$v> == nil {
+								c.err = <import "fmt">.Errorf("invalid list '<typeReference .Spec>', index [%v]: value is nil", (i+c.idx))
+								break
+							}
+						<end ->
+						if err := <encode .Spec.ValueSpec $v $writer>; err != nil {
+							c.err = err
+							break
+						}
+					}
+				}()
+			}
+			wg.Wait()
+			for _, c := range chunks {
+				if c.err != nil {
+					return c.err
+				}
+				c.buffer.WriteTo(<$sw>)
+				c.buffer.Reset()
+				binary.BufferPool.Put(c.buffer)
 			}
 			return <$sw>.WriteListEnd()
 		}

@@ -81,6 +81,8 @@ type ListHeader struct {
 // Writer defines an encoder for a Thrift value, implemented in a streaming
 // fashion.
 type Writer interface {
+	io.Writer
+
 	WriteBool(b bool) error
 	WriteInt8(i int8) error
 	WriteInt16(i int16) error

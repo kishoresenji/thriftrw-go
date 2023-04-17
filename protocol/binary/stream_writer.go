@@ -21,6 +21,7 @@
 package binary
 
 import (
+	"bytes"
 	"io"
 	"math"
 	"sync"
@@ -32,6 +33,12 @@ var streamWriterPool = sync.Pool{
 	New: func() interface{} {
 		return &StreamWriter{}
 	}}
+
+var BufferPool = sync.Pool{
+	New: func() interface{} {
+		return bytes.NewBuffer(make([]byte, 0, 8192))
+	},
+}
 
 // StreamWriter implements basic logic for writing the Thrift Binary Protocol
 // to an io.Writer.
@@ -57,6 +64,10 @@ func NewStreamWriter(w io.Writer) *StreamWriter {
 func returnStreamWriter(sw *StreamWriter) {
 	sw.writer = nil
 	streamWriterPool.Put(sw)
+}
+
+func (sw *StreamWriter) Write(bs []byte) (int, error) {
+	return sw.writer.Write(bs)
 }
 
 func (sw *StreamWriter) write(bs []byte) error {

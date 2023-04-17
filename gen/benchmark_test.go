@@ -64,11 +64,11 @@ func BenchmarkRoundTrip(b *testing.B) {
 			name: "ContainersOfContainers",
 			give: &tc.ContainersOfContainers{
 				ListOfLists: [][]int32{
-					int32range(1, 10),
-					int32range(2, 20),
-					int32range(3, 30),
-					int32range(4, 40),
-					int32range(5, 50),
+					int32range(1, 100000),
+					int32range(2, 200000),
+					int32range(3, 300000),
+					int32range(4, 400000),
+					int32range(5, 500000),
 				},
 				ListOfSets: []map[int32]struct{}{
 					int32set(int32range(6, 60)...),

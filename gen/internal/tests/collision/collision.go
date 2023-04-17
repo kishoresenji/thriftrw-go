@@ -9,13 +9,16 @@ import (
 	errors "errors"
 	fmt "fmt"
 	multierr "go.uber.org/multierr"
+	binary "go.uber.org/thriftrw/protocol/binary"
 	stream "go.uber.org/thriftrw/protocol/stream"
 	thriftreflect "go.uber.org/thriftrw/thriftreflect"
 	wire "go.uber.org/thriftrw/wire"
 	zapcore "go.uber.org/zap/zapcore"
 	math "math"
+	runtime "runtime"
 	strconv "strconv"
 	strings "strings"
+	sync "sync"
 )
 
 var StructConstant *StructCollision2 = &StructCollision2{
@@ -1212,11 +1215,58 @@ func _List_String_Encode(val []string, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for _, v := range val {
-		if err := sw.WriteString(v); err != nil {
-			return err
+	type chunk struct {
+		idx    int
+		val    []string
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
+		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if err := writer.WriteString(v); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }

@@ -13,11 +13,14 @@ import (
 	enums "go.uber.org/thriftrw/gen/internal/tests/enums"
 	typedefs "go.uber.org/thriftrw/gen/internal/tests/typedefs"
 	uuid_conflict "go.uber.org/thriftrw/gen/internal/tests/uuid_conflict"
+	binary "go.uber.org/thriftrw/protocol/binary"
 	stream "go.uber.org/thriftrw/protocol/stream"
 	thriftreflect "go.uber.org/thriftrw/thriftreflect"
 	wire "go.uber.org/thriftrw/wire"
 	zapcore "go.uber.org/zap/zapcore"
+	runtime "runtime"
 	strings "strings"
+	sync "sync"
 )
 
 type ContainersOfContainers struct {
@@ -1236,11 +1239,58 @@ func _List_I32_Encode(val []int32, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for _, v := range val {
-		if err := sw.WriteInt32(v); err != nil {
-			return err
+	type chunk struct {
+		idx    int
+		val    []int32
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
+		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if err := writer.WriteInt32(v); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -1254,14 +1304,62 @@ func _List_List_I32_Encode(val [][]int32, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for i, v := range val {
-		if v == nil {
-			return fmt.Errorf("invalid list '[][]int32', index [%v]: value is nil", i)
+	type chunk struct {
+		idx    int
+		val    [][]int32
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
-		if err := _List_I32_Encode(v, sw); err != nil {
-			return err
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
 		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if v == nil {
+					c.err = fmt.Errorf("invalid list '[][]int32', index [%v]: value is nil", (i + c.idx))
+					break
+				}
+				if err := _List_I32_Encode(v, writer); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -1295,14 +1393,62 @@ func _List_Set_I32_mapType_Encode(val []map[int32]struct{}, sw stream.Writer) er
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for i, v := range val {
-		if v == nil {
-			return fmt.Errorf("invalid list '[]map[int32]struct{}', index [%v]: value is nil", i)
+	type chunk struct {
+		idx    int
+		val    []map[int32]struct{}
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
-		if err := _Set_I32_mapType_Encode(v, sw); err != nil {
-			return err
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
 		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if v == nil {
+					c.err = fmt.Errorf("invalid list '[]map[int32]struct{}', index [%v]: value is nil", (i + c.idx))
+					break
+				}
+				if err := _Set_I32_mapType_Encode(v, writer); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -1339,14 +1485,62 @@ func _List_Map_I32_I32_Encode(val []map[int32]int32, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for i, v := range val {
-		if v == nil {
-			return fmt.Errorf("invalid list '[]map[int32]int32', index [%v]: value is nil", i)
+	type chunk struct {
+		idx    int
+		val    []map[int32]int32
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
-		if err := _Map_I32_I32_Encode(v, sw); err != nil {
-			return err
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
 		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if v == nil {
+					c.err = fmt.Errorf("invalid list '[]map[int32]int32', index [%v]: value is nil", (i + c.idx))
+					break
+				}
+				if err := _Map_I32_I32_Encode(v, writer); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -1403,11 +1597,58 @@ func _List_String_Encode(val []string, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for _, v := range val {
-		if err := sw.WriteString(v); err != nil {
-			return err
+	type chunk struct {
+		idx    int
+		val    []string
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
+		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if err := writer.WriteString(v); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -1600,11 +1841,58 @@ func _List_Double_Encode(val []float64, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for _, v := range val {
-		if err := sw.WriteDouble(v); err != nil {
-			return err
+	type chunk struct {
+		idx    int
+		val    []float64
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
+		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if err := writer.WriteDouble(v); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -3659,11 +3947,58 @@ func _List_EnumDefault_Encode(val []enums.EnumDefault, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for _, v := range val {
-		if err := v.Encode(sw); err != nil {
-			return err
+	type chunk struct {
+		idx    int
+		val    []enums.EnumDefault
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
+		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if err := v.Encode(writer); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -4348,11 +4683,58 @@ func _List_RecordType_Encode(val []enum_conflict.RecordType, sw stream.Writer) e
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for _, v := range val {
-		if err := v.Encode(sw); err != nil {
-			return err
+	type chunk struct {
+		idx    int
+		val    []enum_conflict.RecordType
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
+		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if err := v.Encode(writer); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -4366,11 +4748,58 @@ func _List_RecordType_1_Encode(val []enums.RecordType, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for _, v := range val {
-		if err := v.Encode(sw); err != nil {
-			return err
+	type chunk struct {
+		idx    int
+		val    []enums.RecordType
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
+		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if err := v.Encode(writer); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -4882,14 +5311,62 @@ func _List_UUID_Encode(val []*typedefs.UUID, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for i, v := range val {
-		if v == nil {
-			return fmt.Errorf("invalid list '[]*typedefs.UUID', index [%v]: value is nil", i)
+	type chunk struct {
+		idx    int
+		val    []*typedefs.UUID
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
-		if err := v.Encode(sw); err != nil {
-			return err
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
 		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if v == nil {
+					c.err = fmt.Errorf("invalid list '[]*typedefs.UUID', index [%v]: value is nil", (i + c.idx))
+					break
+				}
+				if err := v.Encode(writer); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -4903,11 +5380,58 @@ func _List_UUID_1_Encode(val []uuid_conflict.UUID, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for _, v := range val {
-		if err := v.Encode(sw); err != nil {
-			return err
+	type chunk struct {
+		idx    int
+		val    []uuid_conflict.UUID
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
+		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if err := v.Encode(writer); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -6708,14 +7232,62 @@ func _List_Binary_Encode(val [][]byte, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for i, v := range val {
-		if v == nil {
-			return fmt.Errorf("invalid list '[][]byte', index [%v]: value is nil", i)
+	type chunk struct {
+		idx    int
+		val    [][]byte
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
-		if err := sw.WriteBinary(v); err != nil {
-			return err
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
 		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if v == nil {
+					c.err = fmt.Errorf("invalid list '[][]byte', index [%v]: value is nil", (i + c.idx))
+					break
+				}
+				if err := writer.WriteBinary(v); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
@@ -6729,11 +7301,58 @@ func _List_I64_Encode(val []int64, sw stream.Writer) error {
 	if err := sw.WriteListBegin(lh); err != nil {
 		return err
 	}
-
-	for _, v := range val {
-		if err := sw.WriteInt64(v); err != nil {
-			return err
+	type chunk struct {
+		idx    int
+		val    []int64
+		buffer *bytes.Buffer
+		err    error
+	}
+	numChunks := runtime.GOMAXPROCS(0)
+	if numChunks > len(val) {
+		numChunks = len(val)
+	}
+	if numChunks == 0 {
+		numChunks = 1
+	}
+	chunkSize := (len(val) + numChunks - 1) / numChunks
+	chunks := make([]*chunk, 0, numChunks)
+	i := 0
+	for {
+		if i >= len(val) {
+			break
 		}
+		j := i + chunkSize
+		if j > len(val) {
+			j = len(val)
+		}
+		chunks = append(chunks, &chunk{idx: i, val: val[i:j], buffer: binary.BufferPool.Get().(*bytes.Buffer)})
+		i += chunkSize
+	}
+	var wg sync.WaitGroup
+	for i := range chunks {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := chunks[i]
+			writer := binary.Default.Writer(c.buffer)
+			for i := range c.val {
+				v := c.val[i]
+				if err := writer.WriteInt64(v); err != nil {
+					c.err = err
+					break
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, c := range chunks {
+		if c.err != nil {
+			return c.err
+		}
+		c.buffer.WriteTo(sw)
+		c.buffer.Reset()
+		binary.BufferPool.Put(c.buffer)
 	}
 	return sw.WriteListEnd()
 }
